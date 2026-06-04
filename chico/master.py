@@ -1,6 +1,22 @@
 import asyncio
 import json
+from parser_utils import validate_worker_request, validate_status_report
 from config import MASTER_HOST, MASTER_PORT, log_master, log_error, INSTANCE_UUID
+
+class TaskQueue:
+    def __init__(self):
+        self.tasks = []
+
+    def add_task(self, task: dict):
+        self.tasks.append(task)
+
+    async def get_next_task(self) -> dict:
+        if not self.tasks:
+            return {"TASK": "NO_TASK"}
+        return self.tasks.pop(0)
+
+global_task_queue = TaskQueue()
+global_task_queue.add_task({"TASK": "QUERY", "USER": "dummy_user"})
 
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     addr = writer.get_extra_info('peername')
@@ -20,23 +36,23 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 try:
                     payload = json.loads(message)
                     
-                    if payload.get("TASK") == "HEARTBEAT":
-                        worker_uuid = payload.get("SERVER_UUID", "Desconhecido")
-                        log_master(f"HEARTBEAT recebido do Worker {worker_uuid} ({addr})")
+                    if validate_worker_request(payload):
+                        worker_uuid = payload.get("WORKER_UUID", "Desconhecido")
+                        log_master(f"Worker {worker_uuid} ({addr}) solicitou uma tarefa.")
                         
-                        # Prepara a resposta
-                        response_payload = {
-                            "SERVER_UUID": INSTANCE_UUID,
-                            "TASK": "HEARTBEAT",
-                            "RESPONSE": "ALIVE"
-                        }
+                        response_payload = await global_task_queue.get_next_task()
                         response_message = json.dumps(response_payload) + "\n"
                         
                         writer.write(response_message.encode('utf-8'))
                         await writer.drain()
-                        log_master(f"Enviou resposta ALIVE para Worker {worker_uuid}")
+                        log_master(f"Enviou tarefa {response_payload.get('TASK')} para Worker {worker_uuid}")
+                    elif validate_status_report(payload):
+                        log_master(f"Auditoria: Tarefa {payload['TASK']} concluída com {payload['STATUS']} pelo Worker {payload['WORKER_UUID']}")
+                        ack_message = json.dumps({"STATUS": "ACK"}) + "\n"
+                        writer.write(ack_message.encode('utf-8'))
+                        await writer.drain()
                     else:
-                        log_master(f"Tarefa não reconhecida de {addr}: {payload.get('TASK')}")
+                        log_master(f"Pacote inválido ou não reconhecido de {addr}: {message}")
                         
                 except json.JSONDecodeError:
                     log_error(f"Erro ao decodificar JSON recebido de {addr}: {message}")
