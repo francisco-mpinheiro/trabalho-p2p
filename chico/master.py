@@ -16,7 +16,9 @@ class TaskQueue:
         return self.tasks.pop(0)
 
 global_task_queue = TaskQueue()
-global_task_queue.add_task({"TASK": "QUERY", "USER": "dummy_user"})
+# Adiciona uma pilha de tarefas para simular carga
+for i in range(1, 11):
+    global_task_queue.add_task({"TASK": "QUERY", "USER": f"user_{i}"})
 
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     addr = writer.get_extra_info('peername')
