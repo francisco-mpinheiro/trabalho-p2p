@@ -14,6 +14,10 @@ connected_workers = {}
 # Dicionário para guardar o endereço do Master de origem dos workers emprestados
 borrowed_origins = {}
 
+tasks_completed = 0
+tasks_failed = 0
+from supervisor_client import send_performance_report
+
 async def populate_tasks():
     """Adiciona tarefas à fila periodicamente para testes."""
     task_id = 1
@@ -197,6 +201,12 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                         worker_type = known_workers.get(worker_uuid, "Desconhecido")
                         log_master(f"Worker [{worker_type}] {worker_uuid} reportou STATUS: {status} para a TASK: {task}")
                         
+                        global tasks_completed, tasks_failed
+                        if status == "OK":
+                            tasks_completed += 1
+                        else:
+                            tasks_failed += 1
+                        
                         # 4. Confirmação Final (ACK)
                         ack_payload = {
                             "STATUS": "ACK",
@@ -222,11 +232,43 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         writer.close()
         await writer.wait_closed()
 
+async def supervisor_loop():
+    while True:
+        await asyncio.sleep(10)
+        
+        alive = len(known_workers)
+        received = sum(1 for t in known_workers.values() if t == "Emprestado")
+        home = alive - received
+        
+        # Borrowed workers out
+        out = 0 
+        
+        borrowed_list = []
+        for uid in [k for k,v in known_workers.items() if v == "Emprestado"]:
+            orig = borrowed_origins.get(uid, "unknown")
+            borrowed_list.append({"direction": "in", "peer_uuid": orig})
+            
+        farm_state = {
+            "tasks_pending": task_queue.qsize(),
+            "tasks_running": 0,
+            "tasks_completed": tasks_completed,
+            "tasks_failed": tasks_failed,
+            "workers_alive": alive,
+            "workers_idle": alive, 
+            "workers_borrowed": out,
+            "workers_received": received,
+            "workers_home": home,
+            "borrowed_workers": borrowed_list
+        }
+        await send_performance_report(MASTER_ID, farm_state)
+
 async def main():
     # Inicia a task de fundo que popula a fila
     asyncio.create_task(populate_tasks())
     # Inicia o monitor de saturação
     asyncio.create_task(monitor_load())
+    # Inicia o monitor do supervisor
+    asyncio.create_task(supervisor_loop())
     
     server = await asyncio.start_server(
         handle_client, MASTER_HOST, MASTER_PORT

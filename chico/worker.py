@@ -8,26 +8,29 @@ is_temporary = False
 async def heartbeat_loop(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     """Envia solicitações de tarefa e processa as respostas e reportes."""
     global MASTER_HOST, MASTER_PORT, ORIGINAL_MASTER_UUID, is_temporary
+    if is_temporary:
+        reg_payload = {
+            "type": "register_temporary_worker",
+            "request_id": str(uuid.uuid4()),
+            "payload": {
+                "worker_id": INSTANCE_UUID,
+                "original_master_address": ORIGINAL_MASTER_UUID
+            }
+        }
+        writer.write((json.dumps(reg_payload) + "\n").encode('utf-8'))
+        await writer.drain()
+        is_temporary = False
+        log_warning("Registrado como temporário no novo Master.")
+        
     while True:
-        if is_temporary:
-            payload = {
-                "type": "register_temporary_worker",
-                "request_id": str(uuid.uuid4()),
-                "payload": {
-                    "worker_id": INSTANCE_UUID,
-                    "original_master_address": ORIGINAL_MASTER_UUID
-                }
-            }
-            is_temporary = False # Envia apenas 1 vez ao conectar
-        else:
-            # 1. Solicitação de Tarefa (Worker -> Master)
-            payload = {
-                "WORKER": "ALIVE",
-                "WORKER_UUID": INSTANCE_UUID
-            }
-            # Diferencial de Origem: Worker "Emprestado"
-            if ORIGINAL_MASTER_UUID:
-                payload["SERVER_UUID"] = ORIGINAL_MASTER_UUID
+        # 1. Solicitação de Tarefa (Worker -> Master)
+        payload = {
+            "WORKER": "ALIVE",
+            "WORKER_UUID": INSTANCE_UUID
+        }
+        # Diferencial de Origem: Worker "Emprestado"
+        if ORIGINAL_MASTER_UUID:
+            payload["SERVER_UUID"] = ORIGINAL_MASTER_UUID
         
         # Codifica como JSON e adiciona o delimitador de nova linha '\n'
         message = json.dumps(payload) + "\n"
