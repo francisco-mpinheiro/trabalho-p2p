@@ -16,6 +16,9 @@ HEARTBEAT_INTERVAL = 10  # Segundos
 # Se a variável de ambiente não existir, gera um UUID aleatório para esta instância
 INSTANCE_UUID = os.getenv('INSTANCE_UUID', str(uuid.uuid4()))
 
+# Identificador do Master Original. Se for preenchido, o Worker atua como "Emprestado"
+ORIGINAL_MASTER_UUID = os.getenv('ORIGINAL_MASTER_UUID', None)
+
 # Utilitário de formatação de Logs Coloridos no terminal
 def log_master(msg):
     """Log formatado para o Master (Azul Ciano)"""
