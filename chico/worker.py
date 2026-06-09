@@ -1,19 +1,33 @@
 import asyncio
 import json
+import uuid
 from config import MASTER_HOST, MASTER_PORT, HEARTBEAT_INTERVAL, INSTANCE_UUID, ORIGINAL_MASTER_UUID, log_worker, log_error, log_warning
+
+is_temporary = False
 
 async def heartbeat_loop(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     """Envia solicitações de tarefa e processa as respostas e reportes."""
+    global MASTER_HOST, MASTER_PORT, ORIGINAL_MASTER_UUID, is_temporary
     while True:
-        # 1. Solicitação de Tarefa (Worker -> Master)
-        payload = {
-            "WORKER": "ALIVE",
-            "WORKER_UUID": INSTANCE_UUID
-        }
-        
-        # Diferencial de Origem: Worker "Emprestado"
-        if ORIGINAL_MASTER_UUID:
-            payload["SERVER_UUID"] = ORIGINAL_MASTER_UUID
+        if is_temporary:
+            payload = {
+                "type": "register_temporary_worker",
+                "request_id": str(uuid.uuid4()),
+                "payload": {
+                    "worker_id": INSTANCE_UUID,
+                    "original_master_address": ORIGINAL_MASTER_UUID
+                }
+            }
+            is_temporary = False # Envia apenas 1 vez ao conectar
+        else:
+            # 1. Solicitação de Tarefa (Worker -> Master)
+            payload = {
+                "WORKER": "ALIVE",
+                "WORKER_UUID": INSTANCE_UUID
+            }
+            # Diferencial de Origem: Worker "Emprestado"
+            if ORIGINAL_MASTER_UUID:
+                payload["SERVER_UUID"] = ORIGINAL_MASTER_UUID
         
         # Codifica como JSON e adiciona o delimitador de nova linha '\n'
         message = json.dumps(payload) + "\n"
@@ -34,6 +48,32 @@ async def heartbeat_loop(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 response_str = data.decode('utf-8').strip()
                 if response_str:
                     response_payload = json.loads(response_str)
+                    
+                    # Suporte M2W (Master to Worker) - Sprint 03
+                    msg_type = response_payload.get("type")
+                    if msg_type == "command_redirect":
+                        new_addr = response_payload.get("payload", {}).get("new_master_address")
+                        log_warning(f"Sendo emprestado! Redirecionando para: {new_addr}")
+                        host, port = new_addr.split(":")
+                        
+                        if not ORIGINAL_MASTER_UUID:
+                            ORIGINAL_MASTER_UUID = f"{MASTER_HOST}:{MASTER_PORT}"
+                        
+                        MASTER_HOST = host
+                        MASTER_PORT = int(port)
+                        is_temporary = True
+                        break # Encerra conexão com master antigo e reconecta ao novo
+                        
+                    elif msg_type == "command_release":
+                        orig_addr = response_payload.get("payload", {}).get("original_master_address")
+                        log_warning(f"Liberado do empréstimo! Retornando para: {orig_addr}")
+                        host, port = orig_addr.split(":")
+                        MASTER_HOST = host
+                        MASTER_PORT = int(port)
+                        ORIGINAL_MASTER_UUID = None
+                        is_temporary = False
+                        break # Encerra e volta pro master original
+                        
                     task = response_payload.get("TASK")
                     
                     if task == "NO_TASK":
@@ -92,6 +132,7 @@ import sys
 
 async def worker_client():
     """Mantém a conexão com o Master ativa, com suporte a reconexão."""
+    global MASTER_HOST, MASTER_PORT, ORIGINAL_MASTER_UUID, is_temporary
     try:
         while True:
             try:
@@ -114,6 +155,13 @@ async def worker_client():
             except Exception as e:
                 log_error(f"Erro inesperado: {e}. Tentando reconectar em 5 segundos...")
                 await asyncio.sleep(5)
+            finally:
+                if ORIGINAL_MASTER_UUID and not is_temporary:
+                    log_warning(f"Conexão com Master Emprestado caiu. Retornando para casa: {ORIGINAL_MASTER_UUID}")
+                    host, port = ORIGINAL_MASTER_UUID.split(":")
+                    MASTER_HOST = host
+                    MASTER_PORT = int(port)
+                    ORIGINAL_MASTER_UUID = None
     except asyncio.CancelledError:
         pass
 
