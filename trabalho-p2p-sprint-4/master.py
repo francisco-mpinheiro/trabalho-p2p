@@ -1,6 +1,7 @@
 import asyncio
 import json
 import random
+import time
 from config import MASTER_HOST, MASTER_PORT, log_master, log_error, INSTANCE_UUID, MASTER_CAPACITY, RELEASE_THRESHOLD, NEIGHBOR_MASTERS, MASTER_ID
 from protocol import build_message, parse_message
 
@@ -22,10 +23,10 @@ async def populate_tasks():
     """Adiciona tarefas à fila periodicamente para testes."""
     task_id = 1
     while True:
-        # Adiciona uma nova tarefa na fila a cada 3 segundos
         new_task = {
             "TASK": "QUERY",
-            "USER": f"usuario_teste_{task_id}"
+            "USER": f"usuario_teste_{task_id}",
+            "enqueued_at": time.time()
         }
         await task_queue.put(new_task)
         log_master(f"[SISTEMA] Nova tarefa adicionada à fila: {new_task['USER']} (Total na fila: {task_queue.qsize()})")
@@ -47,6 +48,9 @@ async def monitor_load():
                     reader, writer = await asyncio.open_connection(host, int(port))
                     req = build_message("request_help", {
                         "master_id": MASTER_ID, 
+                        "master_name": MASTER_ID,
+                        "master_ip": MASTER_HOST,
+                        "master_port": MASTER_PORT,
                         "current_load": current_load, 
                         "capacity": MASTER_CAPACITY, 
                         "workers_needed": 1,
@@ -56,7 +60,17 @@ async def monitor_load():
                     await writer.drain()
                     
                     data = await asyncio.wait_for(reader.readline(), timeout=5.0)
-                    log_master(f"Resposta de {neighbor}: {data.decode().strip()}")
+                    response_str = data.decode().strip()
+                    try:
+                        msg_type, _, _ = parse_message(response_str)
+                        if msg_type == "response_accepted":
+                            log_master(f"O vizinho aceitou o pedido de ajuda! Aguardando o Worker chegar...")
+                        elif msg_type == "response_rejected":
+                            log_master(f"Pedido rejeitado (sem workers disponíveis).")
+                        else:
+                            log_master(f"Resposta de {neighbor}: {response_str}")
+                    except Exception:
+                        log_master(f"Resposta de {neighbor}: {response_str}")
                     writer.close()
                     await writer.wait_closed()
                 except Exception as e:
@@ -96,6 +110,7 @@ async def monitor_load():
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     addr = writer.get_extra_info('peername')
     log_master(f"Nova conexão estabelecida com {addr}")
+    current_worker_id = None
 
     try:
         while True:
@@ -124,7 +139,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                                 # Responde que aceitou
                                 response = build_message("response_accepted", {
                                     "workers_offered": 1,
-                                    "worker_details": [{"id": chosen_worker}]
+                                    "worker_details": [{"id": chosen_worker, "address": f"{addr[0]}:{addr[1]}"}]
                                 }, req_id)
                                 writer.write(response.encode('utf-8'))
                                 await writer.drain()
@@ -151,6 +166,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                             
                         elif msg_type == "register_temporary_worker":
                             worker_uuid = msg_payload.get("worker_id")
+                            current_worker_id = worker_uuid
                             orig = msg_payload.get("original_master_address")
                             known_workers[worker_uuid] = "Emprestado"
                             connected_workers[worker_uuid] = writer
@@ -160,6 +176,8 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                         elif msg_type == "notify_worker_returned":
                             worker_id = msg_payload.get("worker_id")
                             log_master(f"Master vizinho confirmou devolução do Worker {worker_id}")
+                        else:
+                            log_error(f"Tipo de mensagem desconhecido ou não suportado: {msg_type}")
                             
                         continue
                         
@@ -168,6 +186,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     # 1. Solicitação de Tarefa
                     if payload.get("WORKER") == "ALIVE":
                         worker_uuid = payload.get("WORKER_UUID", "Desconhecido")
+                        current_worker_id = worker_uuid if worker_uuid != "Desconhecido" else current_worker_id
                         server_uuid = payload.get("SERVER_UUID")
                         
                         # Verifica Diferencial de Origem
@@ -226,13 +245,22 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     log_error(f"Erro ao decodificar JSON recebido de {addr}: {message}")
                 
     except asyncio.CancelledError:
-        pass
+        raise
     except Exception as e:
         log_error(f"Erro inesperado na conexão com {addr}: {e}")
     finally:
+        if current_worker_id:
+            known_workers.pop(current_worker_id, None)
+            connected_workers.pop(current_worker_id, None)
+            borrowed_origins.pop(current_worker_id, None)
+            log_master(f"Worker {current_worker_id} removido das listas internas.")
+            
         log_master(f"Conexão encerrada com {addr}")
         writer.close()
-        await writer.wait_closed()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
 
 async def supervisor_loop():
     while True:
@@ -250,11 +278,21 @@ async def supervisor_loop():
             orig = borrowed_origins.get(uid, "unknown")
             borrowed_list.append({"direction": "in", "peer_uuid": orig})
             
+        oldest_task_age_s = 0
+        if not task_queue.empty():
+            try:
+                oldest_task = task_queue._queue[0]
+                if "enqueued_at" in oldest_task:
+                    oldest_task_age_s = int(time.time() - oldest_task["enqueued_at"])
+            except Exception:
+                pass
+            
         farm_state = {
             "tasks_pending": task_queue.qsize(),
             "tasks_running": 0,
             "tasks_completed": tasks_completed,
             "tasks_failed": tasks_failed,
+            "oldest_task_age_s": oldest_task_age_s,
             "workers_alive": alive,
             "workers_idle": alive, 
             "workers_borrowed": out,

@@ -21,7 +21,7 @@ ORIGINAL_MASTER_UUID = os.getenv('ORIGINAL_MASTER_UUID', None)
 
 # Configurações P2P do Master
 MASTER_ID = os.getenv('MASTER_ID', 'Master_9')
-MASTER_CAPACITY = int(os.getenv('MASTER_CAPACITY', '100'))
+MASTER_CAPACITY = int(os.getenv('MASTER_CAPACITY', '5'))
 RELEASE_THRESHOLD = int(os.getenv('RELEASE_THRESHOLD', '60'))
 
 # Lista de vizinhos (outros Masters). Ex: "127.0.0.1:5001,127.0.0.1:5002"

@@ -68,7 +68,7 @@ def generate_payload(server_uuid: str, farm_state: dict) -> str:
                     "tasks_running": farm_state.get("tasks_running", 0),
                     "tasks_completed": farm_state.get("tasks_completed", 0),
                     "tasks_failed": farm_state.get("tasks_failed", 0),
-                    "oldest_task_age_s": 0
+                    "oldest_task_age_s": farm_state.get("oldest_task_age_s", 0)
                 }
             },
             "config_thresholds": {

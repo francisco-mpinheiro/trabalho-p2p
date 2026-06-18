@@ -126,7 +126,7 @@ async def heartbeat_loop(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             await asyncio.sleep(HEARTBEAT_INTERVAL)
             
         except asyncio.CancelledError:
-            break
+            raise
         except Exception as e:
             log_error(f"Falha na comunicação com o Master: {e}")
             break # Quebra o loop para forçar uma reconexão
@@ -166,7 +166,7 @@ async def worker_client():
                     MASTER_PORT = int(port)
                     ORIGINAL_MASTER_UUID = None
     except asyncio.CancelledError:
-        pass
+        raise
 
 if __name__ == '__main__':
     try:
