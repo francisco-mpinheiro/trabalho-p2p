@@ -117,7 +117,9 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                             locals_available = [uid for uid, t in known_workers.items() if t == "Local"]
                             if locals_available:
                                 chosen_worker = locals_available[0]
-                                requester_addr = msg_payload.get("master_address", "127.0.0.1:5000")
+                                requester_addr = msg_payload.get("master_address")
+                                if not requester_addr:
+                                    requester_addr = f"{addr[0]}:8000" # Usa o IP de onde veio o pedido
                                 
                                 # Responde que aceitou
                                 response = build_message("response_accepted", {
@@ -282,7 +284,7 @@ async def main():
 
 if __name__ == '__main__':
     try:
-        log_master("Iniciando o Servidor Master...")
+        log_master(f"Iniciando o Servidor Master | UUID: {INSTANCE_UUID} | Nome: {MASTER_ID}")
         asyncio.run(main())
     except KeyboardInterrupt:
         log_master("Servidor Master encerrado manualmente.")

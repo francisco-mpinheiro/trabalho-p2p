@@ -6,7 +6,7 @@ from colorama import init, Fore, Style
 init(autoreset=True)
 
 # Configurações de Rede (Master)
-MASTER_HOST = '127.0.0.1'
+MASTER_HOST = '25.45.84.235'
 MASTER_PORT = int(os.getenv('MASTER_PORT', '8000'))
 
 # Configurações do Worker
@@ -20,12 +20,12 @@ INSTANCE_UUID = os.getenv('INSTANCE_UUID', str(uuid.uuid4()))
 ORIGINAL_MASTER_UUID = os.getenv('ORIGINAL_MASTER_UUID', None)
 
 # Configurações P2P do Master
-MASTER_ID = os.getenv('MASTER_ID', 'Master-Local')
+MASTER_ID = os.getenv('MASTER_ID', 'Master_9')
 MASTER_CAPACITY = int(os.getenv('MASTER_CAPACITY', '100'))
 RELEASE_THRESHOLD = int(os.getenv('RELEASE_THRESHOLD', '60'))
 
 # Lista de vizinhos (outros Masters). Ex: "127.0.0.1:5001,127.0.0.1:5002"
-NEIGHBOR_MASTERS = os.getenv('NEIGHBOR_MASTERS', '127.0.0.1:5001').split(',')
+NEIGHBOR_MASTERS = os.getenv('NEIGHBOR_MASTERS', '25.45.84.204:8000').split(',')
 
 # Configurações do Supervisor (Sprint 04)
 SUPERVISOR_HOST = os.getenv('SUPERVISOR_HOST', 'nuted-ia.dev')
